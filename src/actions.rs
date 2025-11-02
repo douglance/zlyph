@@ -1,0 +1,29 @@
+use gpui::actions;
+
+actions!(
+    editor,
+    [
+        IncreaseFontSize,
+        DecreaseFontSize,
+        ResetFontSize,
+        Copy,
+        Paste,
+        Cut,
+        Undo,
+        Redo,
+        SelectAll,
+        Newline,
+        Backspace,
+        Delete,
+        DeleteToBeginningOfLine,
+        DeleteToEndOfLine,
+        MoveToBeginningOfLine,
+        MoveToEndOfLine,
+        MoveLeft,
+        MoveRight,
+        MoveUp,
+        MoveDown,
+        MoveWordLeft,
+        MoveWordRight,
+    ]
+);

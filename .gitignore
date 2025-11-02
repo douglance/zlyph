@@ -1,0 +1,11 @@
+# Rust build artifacts
+/target/
+
+# Backup files
+**/*.rs.bk
+
+# Debug symbols
+*.pdb
+
+# macOS
+.DS_Store
