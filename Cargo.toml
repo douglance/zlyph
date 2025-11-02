@@ -2,6 +2,12 @@
 name = "zlyph"
 version = "0.1.0"
 edition = "2021"
+authors = ["Doug Lance"]
+description = "A minimal text editor built with GPUI"
+repository = "https://github.com/douglance/zlyph"
+license = "MIT"
+keywords = ["editor", "text-editor", "gpui"]
+categories = ["text-editors"]
 
 [dependencies]
 gpui = { git = "https://github.com/zed-industries/zed" }
