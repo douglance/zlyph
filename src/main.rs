@@ -19,6 +19,9 @@ fn main() {
             KeyBinding::new("cmd-v", Paste, None),
             KeyBinding::new("cmd-z", Undo, None),
             KeyBinding::new("cmd-shift-z", Redo, None),
+            KeyBinding::new("cmd-shift-k", DeleteLine, None),
+            KeyBinding::new("tab", Tab, None),
+            KeyBinding::new("shift-tab", Outdent, None),
             KeyBinding::new("enter", Newline, None),
             KeyBinding::new("backspace", Backspace, None),
             KeyBinding::new("delete", Delete, None),
@@ -30,8 +33,16 @@ fn main() {
             KeyBinding::new("right", MoveRight, None),
             KeyBinding::new("up", MoveUp, None),
             KeyBinding::new("down", MoveDown, None),
+            KeyBinding::new("shift-left", SelectLeft, None),
+            KeyBinding::new("shift-right", SelectRight, None),
+            KeyBinding::new("shift-up", SelectUp, None),
+            KeyBinding::new("shift-down", SelectDown, None),
             KeyBinding::new("alt-left", MoveWordLeft, None),
             KeyBinding::new("alt-right", MoveWordRight, None),
+            KeyBinding::new("alt-shift-left", SelectWordLeft, None),
+            KeyBinding::new("alt-shift-right", SelectWordRight, None),
+            KeyBinding::new("alt-up", MoveLineUp, None),
+            KeyBinding::new("alt-down", MoveLineDown, None),
         ]);
 
         let window_options = WindowOptions {

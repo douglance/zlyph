@@ -17,6 +17,7 @@ actions!(
         Delete,
         DeleteToBeginningOfLine,
         DeleteToEndOfLine,
+        DeleteLine,
         MoveToBeginningOfLine,
         MoveToEndOfLine,
         MoveLeft,
@@ -25,5 +26,15 @@ actions!(
         MoveDown,
         MoveWordLeft,
         MoveWordRight,
+        MoveLineUp,
+        MoveLineDown,
+        SelectLeft,
+        SelectRight,
+        SelectUp,
+        SelectDown,
+        SelectWordLeft,
+        SelectWordRight,
+        Tab,
+        Outdent,
     ]
 );

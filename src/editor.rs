@@ -23,6 +23,8 @@ pub struct TextEditor {
     undo_stack: Vec<EditorState>,
     redo_stack: Vec<EditorState>,
     last_edit_time: Option<Instant>,
+    last_click_time: Option<Instant>,
+    last_click_position: Option<BufferPosition>,
 }
 
 impl TextEditor {
@@ -38,6 +40,8 @@ impl TextEditor {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             last_edit_time: None,
+            last_click_time: None,
+            last_click_position: None,
         }
     }
 
@@ -402,6 +406,288 @@ impl TextEditor {
         cx.notify();
     }
 
+    fn move_line_up(&mut self, _: &MoveLineUp, _: &mut Window, cx: &mut Context<Self>) {
+        if self.cursor.row == 0 {
+            return;
+        }
+
+        self.push_undo_state();
+        self.last_edit_time = None;
+
+        let current_row = self.cursor.row;
+        let current_line = self.buffer.line(current_row).unwrap_or("").to_string();
+        let prev_line = self.buffer.line(current_row - 1).unwrap_or("").to_string();
+
+        let start_prev = BufferPosition::new(current_row - 1, 0);
+        let end_prev = BufferPosition::new(current_row - 1, prev_line.len());
+        self.buffer.delete_range(start_prev, end_prev);
+        self.buffer.delete_char(start_prev);
+
+        let start_current = BufferPosition::new(current_row - 1, 0);
+        let end_current = BufferPosition::new(current_row - 1, current_line.len());
+        self.buffer.delete_range(start_current, end_current);
+
+        self.buffer.insert_str(start_current, &current_line);
+        self.buffer.insert_char(BufferPosition::new(current_row - 1, current_line.len()), '\n');
+        self.buffer.insert_str(BufferPosition::new(current_row, 0), &prev_line);
+
+        self.cursor.row -= 1;
+        cx.notify();
+    }
+
+    fn move_line_down(&mut self, _: &MoveLineDown, _: &mut Window, cx: &mut Context<Self>) {
+        if self.cursor.row + 1 >= self.buffer.line_count() {
+            return;
+        }
+
+        self.push_undo_state();
+        self.last_edit_time = None;
+
+        let current_row = self.cursor.row;
+        let current_line = self.buffer.line(current_row).unwrap_or("").to_string();
+        let next_line = self.buffer.line(current_row + 1).unwrap_or("").to_string();
+
+        let start_current = BufferPosition::new(current_row, 0);
+        let end_current = BufferPosition::new(current_row, current_line.len());
+        self.buffer.delete_range(start_current, end_current);
+        self.buffer.delete_char(start_current);
+
+        let start_next = BufferPosition::new(current_row, 0);
+        let end_next = BufferPosition::new(current_row, next_line.len());
+        self.buffer.delete_range(start_next, end_next);
+
+        self.buffer.insert_str(start_next, &next_line);
+        self.buffer.insert_char(BufferPosition::new(current_row, next_line.len()), '\n');
+        self.buffer.insert_str(BufferPosition::new(current_row + 1, 0), &current_line);
+
+        self.cursor.row += 1;
+        cx.notify();
+    }
+
+    fn delete_line(&mut self, _: &DeleteLine, _: &mut Window, cx: &mut Context<Self>) {
+        self.push_undo_state();
+        self.last_edit_time = None;
+
+        let current_row = self.cursor.row;
+        let line_len = self.buffer.line_len(current_row);
+
+        let start = BufferPosition::new(current_row, 0);
+        let end = BufferPosition::new(current_row, line_len);
+        self.buffer.delete_range(start, end);
+
+        if current_row < self.buffer.line_count() {
+            self.buffer.delete_char(start);
+        } else if current_row > 0 {
+            self.buffer.delete_char(BufferPosition::new(current_row - 1, self.buffer.line_len(current_row - 1)));
+            self.cursor.row -= 1;
+        }
+
+        self.cursor.column = 0;
+        self.clear_selection();
+        cx.notify();
+    }
+
+    fn handle_tab(&mut self, _: &Tab, _: &mut Window, cx: &mut Context<Self>) {
+        self.push_undo_state();
+        self.last_edit_time = None;
+
+        if let Some((start, end)) = self.selection_range() {
+            for row in start.row..=end.row {
+                self.buffer.insert_str(BufferPosition::new(row, 0), "    ");
+            }
+            self.selection_anchor = Some(BufferPosition::new(start.row, start.column + 4));
+            self.cursor = BufferPosition::new(end.row, end.column + 4);
+        } else {
+            self.buffer.insert_str(self.cursor, "    ");
+            self.cursor.column += 4;
+        }
+
+        cx.notify();
+    }
+
+    fn handle_outdent(&mut self, _: &Outdent, _: &mut Window, cx: &mut Context<Self>) {
+        self.push_undo_state();
+        self.last_edit_time = None;
+
+        if let Some((start, end)) = self.selection_range() {
+            for row in start.row..=end.row {
+                if let Some(line) = self.buffer.line(row) {
+                    let spaces_to_remove = line.chars().take(4).take_while(|&c| c == ' ').count();
+                    if spaces_to_remove > 0 {
+                        self.buffer.delete_range(
+                            BufferPosition::new(row, 0),
+                            BufferPosition::new(row, spaces_to_remove),
+                        );
+                    }
+                }
+            }
+            let new_start_col = start.column.saturating_sub(4);
+            let new_end_col = end.column.saturating_sub(4);
+            self.selection_anchor = Some(BufferPosition::new(start.row, new_start_col));
+            self.cursor = BufferPosition::new(end.row, new_end_col);
+        } else {
+            if let Some(line) = self.buffer.line(self.cursor.row) {
+                let spaces_to_remove = line.chars().take(4).take_while(|&c| c == ' ').count();
+                if spaces_to_remove > 0 {
+                    self.buffer.delete_range(
+                        BufferPosition::new(self.cursor.row, 0),
+                        BufferPosition::new(self.cursor.row, spaces_to_remove),
+                    );
+                    self.cursor.column = self.cursor.column.saturating_sub(spaces_to_remove);
+                }
+            }
+        }
+
+        cx.notify();
+    }
+
+    fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
+        if self.selection_anchor.is_none() {
+            self.selection_anchor = Some(self.cursor);
+        }
+
+        if self.cursor.column > 0 {
+            self.cursor.column -= 1;
+            if let Some(line) = self.buffer.line(self.cursor.row) {
+                while self.cursor.column > 0 && !line.is_char_boundary(self.cursor.column) {
+                    self.cursor.column -= 1;
+                }
+            }
+        } else if self.cursor.row > 0 {
+            self.cursor.row -= 1;
+            self.cursor.column = self.buffer.line_len(self.cursor.row);
+        }
+        cx.notify();
+    }
+
+    fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
+        if self.selection_anchor.is_none() {
+            self.selection_anchor = Some(self.cursor);
+        }
+
+        let line_len = self.buffer.line_len(self.cursor.row);
+        if self.cursor.column < line_len {
+            self.cursor.column += 1;
+            if let Some(line) = self.buffer.line(self.cursor.row) {
+                while self.cursor.column < line.len() && !line.is_char_boundary(self.cursor.column) {
+                    self.cursor.column += 1;
+                }
+            }
+        } else if self.cursor.row + 1 < self.buffer.line_count() {
+            self.cursor.row += 1;
+            self.cursor.column = 0;
+        }
+        cx.notify();
+    }
+
+    fn select_up(&mut self, _: &SelectUp, _: &mut Window, cx: &mut Context<Self>) {
+        if self.selection_anchor.is_none() {
+            self.selection_anchor = Some(self.cursor);
+        }
+        self.cursor = self.buffer.move_visual_up(self.cursor);
+        cx.notify();
+    }
+
+    fn select_down(&mut self, _: &SelectDown, _: &mut Window, cx: &mut Context<Self>) {
+        if self.selection_anchor.is_none() {
+            self.selection_anchor = Some(self.cursor);
+        }
+        self.cursor = self.buffer.move_visual_down(self.cursor);
+        cx.notify();
+    }
+
+    fn select_word_left(&mut self, _: &SelectWordLeft, _: &mut Window, cx: &mut Context<Self>) {
+        if self.selection_anchor.is_none() {
+            self.selection_anchor = Some(self.cursor);
+        }
+
+        if let Some(line) = self.buffer.line(self.cursor.row) {
+            if self.cursor.column == 0 {
+                if self.cursor.row > 0 {
+                    self.cursor.row -= 1;
+                    self.cursor.column = self.buffer.line_len(self.cursor.row);
+                }
+                cx.notify();
+                return;
+            }
+
+            let chars: Vec<char> = line.chars().collect();
+            let mut char_pos = line[..self.cursor.column].chars().count();
+
+            if char_pos == 0 {
+                cx.notify();
+                return;
+            }
+
+            char_pos -= 1;
+            while char_pos > 0 && chars[char_pos].is_whitespace() {
+                char_pos -= 1;
+            }
+
+            if char_pos > 0 {
+                let is_alphanumeric = chars[char_pos].is_alphanumeric() || chars[char_pos] == '_';
+                while char_pos > 0 {
+                    let prev_char = chars[char_pos - 1];
+                    let prev_is_alphanumeric = prev_char.is_alphanumeric() || prev_char == '_';
+                    if is_alphanumeric != prev_is_alphanumeric || prev_char.is_whitespace() {
+                        break;
+                    }
+                    char_pos -= 1;
+                }
+            }
+
+            let byte_pos: usize = chars[..char_pos].iter().map(|c| c.len_utf8()).sum();
+            self.cursor.column = byte_pos;
+        }
+        cx.notify();
+    }
+
+    fn select_word_right(&mut self, _: &SelectWordRight, _: &mut Window, cx: &mut Context<Self>) {
+        if self.selection_anchor.is_none() {
+            self.selection_anchor = Some(self.cursor);
+        }
+
+        if let Some(line) = self.buffer.line(self.cursor.row) {
+            if self.cursor.column >= line.len() {
+                if self.cursor.row + 1 < self.buffer.line_count() {
+                    self.cursor.row += 1;
+                    self.cursor.column = 0;
+                }
+                cx.notify();
+                return;
+            }
+
+            let after = &line[self.cursor.column..];
+            let chars: Vec<char> = after.chars().collect();
+            let mut char_pos = 0;
+
+            if chars.is_empty() {
+                cx.notify();
+                return;
+            }
+
+            while char_pos < chars.len() && chars[char_pos].is_whitespace() {
+                char_pos += 1;
+            }
+
+            if char_pos < chars.len() {
+                let is_alphanumeric = chars[char_pos].is_alphanumeric() || chars[char_pos] == '_';
+                while char_pos < chars.len() {
+                    let curr_char = chars[char_pos];
+                    let curr_is_alphanumeric = curr_char.is_alphanumeric() || curr_char == '_';
+                    if is_alphanumeric != curr_is_alphanumeric || curr_char.is_whitespace() {
+                        break;
+                    }
+                    char_pos += 1;
+                }
+            }
+
+            let byte_offset: usize = chars[..char_pos].iter().map(|c| c.len_utf8()).sum();
+            self.cursor.column += byte_offset;
+        }
+        cx.notify();
+    }
+
     fn select_all(&mut self, _: &SelectAll, _window: &mut Window, cx: &mut Context<Self>) {
         self.selection_anchor = Some(BufferPosition::zero());
         let last_row = self.buffer.line_count().saturating_sub(1);
@@ -524,13 +810,102 @@ impl TextEditor {
         BufferPosition::new(last_row, last_col)
     }
 
+    fn find_word_boundaries(&self, pos: BufferPosition) -> Option<(BufferPosition, BufferPosition)> {
+        let line = self.buffer.line(pos.row)?;
+        if line.is_empty() || pos.column >= line.len() {
+            return None;
+        }
+
+        let chars: Vec<char> = line.chars().collect();
+        let char_indices: Vec<usize> = line.char_indices().map(|(i, _)| i).collect();
+
+        let mut char_pos = 0;
+        for (idx, &byte_idx) in char_indices.iter().enumerate() {
+            if byte_idx >= pos.column {
+                char_pos = idx;
+                break;
+            }
+        }
+
+        if char_pos >= chars.len() {
+            return None;
+        }
+
+        let current_char = chars[char_pos];
+        if !current_char.is_alphanumeric() && current_char != '_' {
+            return None;
+        }
+
+        let mut start_char = char_pos;
+        while start_char > 0 {
+            let ch = chars[start_char - 1];
+            if !ch.is_alphanumeric() && ch != '_' {
+                break;
+            }
+            start_char -= 1;
+        }
+
+        let mut end_char = char_pos;
+        while end_char < chars.len() {
+            let ch = chars[end_char];
+            if !ch.is_alphanumeric() && ch != '_' {
+                break;
+            }
+            end_char += 1;
+        }
+
+        let start_byte = if start_char < char_indices.len() {
+            char_indices[start_char]
+        } else {
+            line.len()
+        };
+
+        let end_byte = if end_char < char_indices.len() {
+            char_indices[end_char]
+        } else {
+            line.len()
+        };
+
+        Some((
+            BufferPosition::new(pos.row, start_byte),
+            BufferPosition::new(pos.row, end_byte),
+        ))
+    }
+
     fn handle_mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        self.is_dragging = true;
+        const DOUBLE_CLICK_DURATION: Duration = Duration::from_millis(500);
+
         let window_size = window.viewport_size();
         let wrap_width = window_size.width - px(32.0);
         let position = self.position_from_mouse(event.position, window, wrap_width);
-        self.cursor = position;
-        self.selection_anchor = Some(position);
+
+        let now = Instant::now();
+        let is_double_click = if let (Some(last_time), Some(last_pos)) = (self.last_click_time, self.last_click_position) {
+            now.duration_since(last_time) < DOUBLE_CLICK_DURATION && last_pos == position
+        } else {
+            false
+        };
+
+        if is_double_click {
+            if let Some((start, end)) = self.find_word_boundaries(position) {
+                self.selection_anchor = Some(start);
+                self.cursor = end;
+                self.is_dragging = false;
+            } else {
+                self.cursor = position;
+                self.selection_anchor = Some(position);
+                self.is_dragging = true;
+            }
+            self.last_click_time = None;
+            self.last_click_position = None;
+        } else {
+            self.cursor = position;
+            self.selection_anchor = Some(position);
+            self.is_dragging = true;
+            self.last_click_time = Some(now);
+            self.last_click_position = Some(position);
+        }
+
         cx.notify();
     }
 
@@ -605,12 +980,23 @@ impl Render for TextEditor {
             .on_action(_cx.listener(Self::move_down))
             .on_action(_cx.listener(Self::move_word_left))
             .on_action(_cx.listener(Self::move_word_right))
+            .on_action(_cx.listener(Self::move_line_up))
+            .on_action(_cx.listener(Self::move_line_down))
+            .on_action(_cx.listener(Self::select_left))
+            .on_action(_cx.listener(Self::select_right))
+            .on_action(_cx.listener(Self::select_up))
+            .on_action(_cx.listener(Self::select_down))
+            .on_action(_cx.listener(Self::select_word_left))
+            .on_action(_cx.listener(Self::select_word_right))
             .on_action(_cx.listener(Self::select_all))
             .on_action(_cx.listener(Self::copy))
             .on_action(_cx.listener(Self::cut))
             .on_action(_cx.listener(Self::paste))
             .on_action(_cx.listener(Self::undo))
             .on_action(_cx.listener(Self::redo))
+            .on_action(_cx.listener(Self::delete_line))
+            .on_action(_cx.listener(Self::handle_tab))
+            .on_action(_cx.listener(Self::handle_outdent))
             .on_key_down(_cx.listener(Self::handle_key_down))
             .on_mouse_down(MouseButton::Left, _cx.listener(Self::handle_mouse_down))
             .on_mouse_move(_cx.listener(Self::handle_mouse_move))
@@ -618,6 +1004,7 @@ impl Render for TextEditor {
             .size_full()
             .bg(self.theme.background)
             .text_color(self.theme.text)
+            .cursor(CursorStyle::IBeam)
             .pt_10()
             .px_4()
             .child(
