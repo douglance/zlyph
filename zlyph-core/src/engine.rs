@@ -1,6 +1,9 @@
 //! Core editor engine with platform-agnostic business logic
 
 use crate::{BufferPosition, EditorAction, EditorState};
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 pub struct EditorEngine {
@@ -214,16 +217,66 @@ impl EditorEngine {
         }
     }
 
+    fn detect_list_pattern(line: &str) -> Option<(String, usize, bool)> {
+        let trimmed = line.trim_start();
+        let indent_len = line.len() - trimmed.len();
+
+        if let Some(rest) = trimmed.strip_prefix("- [ ] ") {
+            return Some(("- [ ] ".to_string(), indent_len + 6, rest.is_empty()));
+        }
+        if let Some(rest) = trimmed.strip_prefix("- [x] ") {
+            return Some(("- [ ] ".to_string(), indent_len + 6, rest.is_empty()));
+        }
+        if let Some(rest) = trimmed.strip_prefix("- [X] ") {
+            return Some(("- [ ] ".to_string(), indent_len + 6, rest.is_empty()));
+        }
+        if let Some(rest) = trimmed.strip_prefix("- ") {
+            return Some(("- ".to_string(), indent_len + 2, rest.is_empty()));
+        }
+        if let Some(rest) = trimmed.strip_prefix("* ") {
+            return Some(("* ".to_string(), indent_len + 2, rest.is_empty()));
+        }
+        if let Some(rest) = trimmed.strip_prefix("+ ") {
+            return Some(("+ ".to_string(), indent_len + 2, rest.is_empty()));
+        }
+
+        if let Some(number_end) = trimmed.find(". ") {
+            if let Ok(num) = trimmed[..number_end].parse::<usize>() {
+                let rest = &trimmed[number_end + 2..];
+                let next_num = num + 1;
+                let pattern = format!("{}. ", next_num);
+                return Some((pattern, indent_len + number_end + 2, rest.is_empty()));
+            }
+        }
+
+        None
+    }
+
     fn newline(&mut self) {
         self.push_undo_state();
         self.last_edit_time = None;
         self.delete_selection();
 
         let line = self.state.lines[self.state.cursor.row].clone();
-        let (before, after) = line.split_at(self.state.cursor.column);
-        self.state.lines[self.state.cursor.row] = before.to_string();
-        self.state.lines.insert(self.state.cursor.row + 1, after.to_string());
-        self.state.cursor = BufferPosition::new(self.state.cursor.row + 1, 0);
+
+        if let Some((pattern, pattern_len, is_empty)) = Self::detect_list_pattern(&line) {
+            if is_empty {
+                let before_pattern = &line[..line.len() - pattern_len];
+                self.state.lines[self.state.cursor.row] = before_pattern.to_string();
+                self.state.lines.insert(self.state.cursor.row + 1, String::new());
+                self.state.cursor = BufferPosition::new(self.state.cursor.row + 1, 0);
+            } else {
+                let (before, after) = line.split_at(self.state.cursor.column);
+                self.state.lines[self.state.cursor.row] = before.to_string();
+                self.state.lines.insert(self.state.cursor.row + 1, pattern.clone() + after);
+                self.state.cursor = BufferPosition::new(self.state.cursor.row + 1, pattern.len());
+            }
+        } else {
+            let (before, after) = line.split_at(self.state.cursor.column);
+            self.state.lines[self.state.cursor.row] = before.to_string();
+            self.state.lines.insert(self.state.cursor.row + 1, after.to_string());
+            self.state.cursor = BufferPosition::new(self.state.cursor.row + 1, 0);
+        }
     }
 
     fn move_left(&mut self) {
@@ -482,6 +535,39 @@ impl EditorEngine {
         let last_row = self.state.lines.len().saturating_sub(1);
         let last_col = self.state.lines[last_row].len();
         self.state.cursor = BufferPosition::new(last_row, last_col);
+    }
+
+    /// Load editor state from a file
+    pub fn load_from_file<P: AsRef<Path>>(&mut self, path: P) -> io::Result<()> {
+        let content = fs::read_to_string(path)?;
+        self.state.lines = if content.is_empty() {
+            vec![String::new()]
+        } else {
+            content.lines().map(|s| s.to_string()).collect()
+        };
+        self.state.cursor = BufferPosition::zero();
+        self.state.selection_anchor = None;
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+        self.last_edit_time = None;
+        Ok(())
+    }
+
+    /// Save editor state to a file
+    pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
+        let content = self.state.lines.join("\n");
+        if let Some(parent) = path.as_ref().parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(path, content)
+    }
+
+    /// Get default config file path
+    pub fn default_file_path() -> PathBuf {
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_else(|_| ".".to_string());
+        PathBuf::from(home).join(".config").join("zlyph").join("default.txt")
     }
 }
 

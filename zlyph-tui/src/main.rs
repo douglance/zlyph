@@ -19,9 +19,15 @@ struct TuiEditor {
 
 impl TuiEditor {
     fn new() -> Self {
-        Self {
-            engine: EditorEngine::new(),
+        let mut engine = EditorEngine::new();
+        let file_path = EditorEngine::default_file_path();
+
+        // Load existing file if it exists
+        if file_path.exists() {
+            let _ = engine.load_from_file(&file_path);
         }
+
+        Self { engine }
     }
 
     fn run(&mut self) -> Result<()> {
@@ -47,9 +53,16 @@ impl TuiEditor {
             if let Event::Key(key) = event::read()? {
                 if let Some(action) = self.translate_key_event(key) {
                     if matches!(action, EditorAction::Quit) {
+                        // Save before quitting
+                        let file_path = EditorEngine::default_file_path();
+                        let _ = self.engine.save_to_file(&file_path);
                         break;
                     }
                     self.engine.handle_action(action);
+
+                    // Auto-save after each action
+                    let file_path = EditorEngine::default_file_path();
+                    let _ = self.engine.save_to_file(&file_path);
                 }
             }
         }

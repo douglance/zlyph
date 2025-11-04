@@ -18,19 +18,9 @@ pub struct TextEditor {
 
 impl TextEditor {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        let mut engine = EditorEngine::new();
-        let file_path = EditorEngine::default_file_path();
-
-        // Load existing file if it exists
-        if file_path.exists() {
-            let _ = engine.load_from_file(&file_path);
-        }
-
-        let buffer = TextBuffer::from_string(engine.state().to_string());
-
         Self {
-            engine,
-            buffer,
+            engine: EditorEngine::new(),
+            buffer: TextBuffer::new(),
             focus_handle: cx.focus_handle(),
             theme: Theme::default(),
             is_dragging: false,
@@ -44,31 +34,13 @@ impl TextEditor {
         self.buffer = TextBuffer::from_string(state.to_string());
     }
 
-    fn save_to_file(&self) {
-        let file_path = EditorEngine::default_file_path();
-        let _ = self.engine.save_to_file(&file_path);
-    }
-
-    fn sync_and_save(&mut self) {
-        self.sync_buffer_from_engine();
-        self.save_to_file();
-    }
-
     fn get_cursor(&self) -> BufferPosition {
         let core_cursor = self.engine.state().cursor;
         BufferPosition::new(core_cursor.row, core_cursor.column)
     }
 
-    fn set_cursor(&mut self, pos: BufferPosition) {
-        self.engine.state_mut().cursor = zlyph_core::BufferPosition::new(pos.row, pos.column);
-    }
-
     fn get_selection_anchor(&self) -> Option<BufferPosition> {
         self.engine.state().selection_anchor.map(|pos| BufferPosition::new(pos.row, pos.column))
-    }
-
-    fn set_selection_anchor(&mut self, pos: Option<BufferPosition>) {
-        self.engine.state_mut().selection_anchor = pos.map(|p| zlyph_core::BufferPosition::new(p.row, p.column));
     }
 
     fn get_font_size(&self) -> f32 {
@@ -88,26 +60,35 @@ impl TextEditor {
         })
     }
 
-    // All action handlers delegate to engine
     fn undo(&mut self, _: &Undo, _window: &mut Window, cx: &mut Context<Self>) {
         self.engine.handle_action(EditorAction::Undo);
-        self.sync_and_save();
+        self.sync_buffer_from_engine();
         cx.notify();
     }
 
     fn redo(&mut self, _: &Redo, _window: &mut Window, cx: &mut Context<Self>) {
         self.engine.handle_action(EditorAction::Redo);
-        self.sync_and_save();
+        self.sync_buffer_from_engine();
         cx.notify();
     }
 
-    fn increase_font_size(&mut self, _: &IncreaseFontSize, _window: &mut Window, cx: &mut Context<Self>) {
+    fn increase_font_size(
+        &mut self,
+        _: &IncreaseFontSize,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.engine.handle_action(EditorAction::IncreaseFontSize);
         self.buffer.invalidate_all_layouts();
         cx.notify();
     }
 
-    fn decrease_font_size(&mut self, _: &DecreaseFontSize, _window: &mut Window, cx: &mut Context<Self>) {
+    fn decrease_font_size(
+        &mut self,
+        _: &DecreaseFontSize,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.engine.handle_action(EditorAction::DecreaseFontSize);
         self.buffer.invalidate_all_layouts();
         cx.notify();
@@ -121,136 +102,495 @@ impl TextEditor {
 
     fn handle_newline(&mut self, _: &Newline, _window: &mut Window, cx: &mut Context<Self>) {
         self.engine.handle_action(EditorAction::Newline);
-        self.sync_and_save();
+        self.sync_buffer_from_engine();
         cx.notify();
     }
 
     fn handle_backspace(&mut self, _: &Backspace, _window: &mut Window, cx: &mut Context<Self>) {
         self.engine.handle_action(EditorAction::Backspace);
-        self.sync_and_save();
+        self.sync_buffer_from_engine();
         cx.notify();
     }
 
     fn handle_delete(&mut self, _: &Delete, _window: &mut Window, cx: &mut Context<Self>) {
         self.engine.handle_action(EditorAction::Delete);
-        self.sync_and_save();
+        self.sync_buffer_from_engine();
         cx.notify();
     }
 
-    fn delete_to_beginning_of_line(&mut self, _: &DeleteToBeginningOfLine, _window: &mut Window, cx: &mut Context<Self>) {
+    fn delete_to_beginning_of_line(
+        &mut self,
+        _: &DeleteToBeginningOfLine,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.engine.handle_action(EditorAction::DeleteToBeginningOfLine);
-        self.sync_and_save();
+        self.sync_buffer_from_engine();
         cx.notify();
     }
 
-    fn delete_to_end_of_line(&mut self, _: &DeleteToEndOfLine, _window: &mut Window, cx: &mut Context<Self>) {
+    fn delete_to_end_of_line(
+        &mut self,
+        _: &DeleteToEndOfLine,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.engine.handle_action(EditorAction::DeleteToEndOfLine);
-        self.sync_and_save();
+        self.sync_buffer_from_engine();
         cx.notify();
     }
 
-    fn move_to_beginning_of_line(&mut self, _: &MoveToBeginningOfLine, _window: &mut Window, cx: &mut Context<Self>) {
-        self.engine.handle_action(EditorAction::MoveToBeginningOfLine);
+    fn move_to_beginning_of_line(
+        &mut self,
+        _: &MoveToBeginningOfLine,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.clear_selection();
+        self.cursor = self.buffer.visual_line_start(self.cursor);
         cx.notify();
     }
 
-    fn move_to_end_of_line(&mut self, _: &MoveToEndOfLine, _window: &mut Window, cx: &mut Context<Self>) {
-        self.engine.handle_action(EditorAction::MoveToEndOfLine);
+    fn move_to_end_of_line(
+        &mut self,
+        _: &MoveToEndOfLine,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.clear_selection();
+        self.cursor = self.buffer.visual_line_end(self.cursor);
         cx.notify();
     }
 
     fn move_left(&mut self, _: &MoveLeft, _window: &mut Window, cx: &mut Context<Self>) {
-        self.engine.handle_action(EditorAction::MoveLeft);
+        self.clear_selection();
+        if self.cursor.column > 0 {
+            self.cursor.column -= 1;
+            if let Some(line) = self.buffer.line(self.cursor.row) {
+                while self.cursor.column > 0 && !line.is_char_boundary(self.cursor.column) {
+                    self.cursor.column -= 1;
+                }
+            }
+        } else if self.cursor.row > 0 {
+            self.cursor.row -= 1;
+            self.cursor.column = self.buffer.line_len(self.cursor.row);
+        }
         cx.notify();
     }
 
     fn move_right(&mut self, _: &MoveRight, _window: &mut Window, cx: &mut Context<Self>) {
-        self.engine.handle_action(EditorAction::MoveRight);
+        self.clear_selection();
+        let line_len = self.buffer.line_len(self.cursor.row);
+        if self.cursor.column < line_len {
+            self.cursor.column += 1;
+            if let Some(line) = self.buffer.line(self.cursor.row) {
+                while self.cursor.column < line.len() && !line.is_char_boundary(self.cursor.column)
+                {
+                    self.cursor.column += 1;
+                }
+            }
+        } else if self.cursor.row + 1 < self.buffer.line_count() {
+            self.cursor.row += 1;
+            self.cursor.column = 0;
+        }
         cx.notify();
     }
 
     fn move_up(&mut self, _: &MoveUp, _window: &mut Window, cx: &mut Context<Self>) {
-        self.engine.handle_action(EditorAction::MoveUp);
+        self.clear_selection();
+        self.cursor = self.buffer.move_visual_up(self.cursor);
         cx.notify();
     }
 
     fn move_down(&mut self, _: &MoveDown, _window: &mut Window, cx: &mut Context<Self>) {
-        self.engine.handle_action(EditorAction::MoveDown);
+        self.clear_selection();
+        self.cursor = self.buffer.move_visual_down(self.cursor);
         cx.notify();
     }
 
     fn move_word_left(&mut self, _: &MoveWordLeft, _: &mut Window, cx: &mut Context<Self>) {
-        self.engine.handle_action(EditorAction::MoveWordLeft);
+        self.clear_selection();
+        if let Some(line) = self.buffer.line(self.cursor.row) {
+            if self.cursor.column == 0 {
+                if self.cursor.row > 0 {
+                    self.cursor.row -= 1;
+                    self.cursor.column = self.buffer.line_len(self.cursor.row);
+                }
+                cx.notify();
+                return;
+            }
+
+            let chars: Vec<char> = line.chars().collect();
+            let mut char_pos = line[..self.cursor.column].chars().count();
+
+            if char_pos == 0 {
+                cx.notify();
+                return;
+            }
+
+            char_pos -= 1;
+            while char_pos > 0 && chars[char_pos].is_whitespace() {
+                char_pos -= 1;
+            }
+
+            if char_pos > 0 {
+                let is_alphanumeric = chars[char_pos].is_alphanumeric() || chars[char_pos] == '_';
+                while char_pos > 0 {
+                    let prev_char = chars[char_pos - 1];
+                    let prev_is_alphanumeric = prev_char.is_alphanumeric() || prev_char == '_';
+                    if is_alphanumeric != prev_is_alphanumeric || prev_char.is_whitespace() {
+                        break;
+                    }
+                    char_pos -= 1;
+                }
+            }
+
+            let byte_pos: usize = chars[..char_pos].iter().map(|c| c.len_utf8()).sum();
+            self.cursor.column = byte_pos;
+        }
         cx.notify();
     }
 
     fn move_word_right(&mut self, _: &MoveWordRight, _: &mut Window, cx: &mut Context<Self>) {
-        self.engine.handle_action(EditorAction::MoveWordRight);
+        self.clear_selection();
+        if let Some(line) = self.buffer.line(self.cursor.row) {
+            if self.cursor.column >= line.len() {
+                if self.cursor.row + 1 < self.buffer.line_count() {
+                    self.cursor.row += 1;
+                    self.cursor.column = 0;
+                }
+                cx.notify();
+                return;
+            }
+
+            let after = &line[self.cursor.column..];
+            let chars: Vec<char> = after.chars().collect();
+            let mut char_pos = 0;
+
+            if chars.is_empty() {
+                cx.notify();
+                return;
+            }
+
+            while char_pos < chars.len() && chars[char_pos].is_whitespace() {
+                char_pos += 1;
+            }
+
+            if char_pos < chars.len() {
+                let is_alphanumeric = chars[char_pos].is_alphanumeric() || chars[char_pos] == '_';
+                while char_pos < chars.len() {
+                    let curr_char = chars[char_pos];
+                    let curr_is_alphanumeric = curr_char.is_alphanumeric() || curr_char == '_';
+                    if is_alphanumeric != curr_is_alphanumeric || curr_char.is_whitespace() {
+                        break;
+                    }
+                    char_pos += 1;
+                }
+            }
+
+            let byte_offset: usize = chars[..char_pos].iter().map(|c| c.len_utf8()).sum();
+            self.cursor.column += byte_offset;
+        }
         cx.notify();
     }
 
     fn move_line_up(&mut self, _: &MoveLineUp, _: &mut Window, cx: &mut Context<Self>) {
-        self.engine.handle_action(EditorAction::MoveLineUp);
-        self.sync_and_save();
+        if self.cursor.row == 0 {
+            return;
+        }
+
+        self.push_undo_state();
+        self.last_edit_time = None;
+
+        let current_row = self.cursor.row;
+        let current_line = self.buffer.line(current_row).unwrap_or("").to_string();
+        let prev_line = self.buffer.line(current_row - 1).unwrap_or("").to_string();
+
+        let start_prev = BufferPosition::new(current_row - 1, 0);
+        let end_prev = BufferPosition::new(current_row - 1, prev_line.len());
+        self.buffer.delete_range(start_prev, end_prev);
+        self.buffer.delete_char(start_prev);
+
+        let start_current = BufferPosition::new(current_row - 1, 0);
+        let end_current = BufferPosition::new(current_row - 1, current_line.len());
+        self.buffer.delete_range(start_current, end_current);
+
+        self.buffer.insert_str(start_current, &current_line);
+        self.buffer.insert_char(
+            BufferPosition::new(current_row - 1, current_line.len()),
+            '\n',
+        );
+        self.buffer
+            .insert_str(BufferPosition::new(current_row, 0), &prev_line);
+
+        self.cursor.row -= 1;
         cx.notify();
     }
 
     fn move_line_down(&mut self, _: &MoveLineDown, _: &mut Window, cx: &mut Context<Self>) {
-        self.engine.handle_action(EditorAction::MoveLineDown);
-        self.sync_and_save();
+        if self.cursor.row + 1 >= self.buffer.line_count() {
+            return;
+        }
+
+        self.push_undo_state();
+        self.last_edit_time = None;
+
+        let current_row = self.cursor.row;
+        let current_line = self.buffer.line(current_row).unwrap_or("").to_string();
+        let next_line = self.buffer.line(current_row + 1).unwrap_or("").to_string();
+
+        let start_current = BufferPosition::new(current_row, 0);
+        let end_current = BufferPosition::new(current_row, current_line.len());
+        self.buffer.delete_range(start_current, end_current);
+        self.buffer.delete_char(start_current);
+
+        let start_next = BufferPosition::new(current_row, 0);
+        let end_next = BufferPosition::new(current_row, next_line.len());
+        self.buffer.delete_range(start_next, end_next);
+
+        self.buffer.insert_str(start_next, &next_line);
+        self.buffer
+            .insert_char(BufferPosition::new(current_row, next_line.len()), '\n');
+        self.buffer
+            .insert_str(BufferPosition::new(current_row + 1, 0), &current_line);
+
+        self.cursor.row += 1;
         cx.notify();
     }
 
     fn delete_line(&mut self, _: &DeleteLine, _: &mut Window, cx: &mut Context<Self>) {
-        self.engine.handle_action(EditorAction::DeleteLine);
-        self.sync_and_save();
+        self.push_undo_state();
+        self.last_edit_time = None;
+
+        let current_row = self.cursor.row;
+        let line_len = self.buffer.line_len(current_row);
+
+        let start = BufferPosition::new(current_row, 0);
+        let end = BufferPosition::new(current_row, line_len);
+        self.buffer.delete_range(start, end);
+
+        if current_row < self.buffer.line_count() {
+            self.buffer.delete_char(start);
+        } else if current_row > 0 {
+            self.buffer.delete_char(BufferPosition::new(
+                current_row - 1,
+                self.buffer.line_len(current_row - 1),
+            ));
+            self.cursor.row -= 1;
+        }
+
+        self.cursor.column = 0;
+        self.clear_selection();
         cx.notify();
     }
 
     fn handle_tab(&mut self, _: &Tab, _: &mut Window, cx: &mut Context<Self>) {
-        self.engine.handle_action(EditorAction::Tab);
-        self.sync_and_save();
+        self.push_undo_state();
+        self.last_edit_time = None;
+
+        if let Some((start, end)) = self.selection_range() {
+            for row in start.row..=end.row {
+                self.buffer.insert_str(BufferPosition::new(row, 0), "    ");
+            }
+            self.selection_anchor = Some(BufferPosition::new(start.row, start.column + 4));
+            self.cursor = BufferPosition::new(end.row, end.column + 4);
+        } else {
+            self.buffer.insert_str(self.cursor, "    ");
+            self.cursor.column += 4;
+        }
+
         cx.notify();
     }
 
     fn handle_outdent(&mut self, _: &Outdent, _: &mut Window, cx: &mut Context<Self>) {
-        self.engine.handle_action(EditorAction::Outdent);
-        self.sync_and_save();
+        self.push_undo_state();
+        self.last_edit_time = None;
+
+        if let Some((start, end)) = self.selection_range() {
+            for row in start.row..=end.row {
+                if let Some(line) = self.buffer.line(row) {
+                    let spaces_to_remove = line.chars().take(4).take_while(|&c| c == ' ').count();
+                    if spaces_to_remove > 0 {
+                        self.buffer.delete_range(
+                            BufferPosition::new(row, 0),
+                            BufferPosition::new(row, spaces_to_remove),
+                        );
+                    }
+                }
+            }
+            let new_start_col = start.column.saturating_sub(4);
+            let new_end_col = end.column.saturating_sub(4);
+            self.selection_anchor = Some(BufferPosition::new(start.row, new_start_col));
+            self.cursor = BufferPosition::new(end.row, new_end_col);
+        } else {
+            if let Some(line) = self.buffer.line(self.cursor.row) {
+                let spaces_to_remove = line.chars().take(4).take_while(|&c| c == ' ').count();
+                if spaces_to_remove > 0 {
+                    self.buffer.delete_range(
+                        BufferPosition::new(self.cursor.row, 0),
+                        BufferPosition::new(self.cursor.row, spaces_to_remove),
+                    );
+                    self.cursor.column = self.cursor.column.saturating_sub(spaces_to_remove);
+                }
+            }
+        }
+
         cx.notify();
     }
 
     fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
-        self.engine.handle_action(EditorAction::SelectLeft);
+        if self.selection_anchor.is_none() {
+            self.selection_anchor = Some(self.cursor);
+        }
+
+        if self.cursor.column > 0 {
+            self.cursor.column -= 1;
+            if let Some(line) = self.buffer.line(self.cursor.row) {
+                while self.cursor.column > 0 && !line.is_char_boundary(self.cursor.column) {
+                    self.cursor.column -= 1;
+                }
+            }
+        } else if self.cursor.row > 0 {
+            self.cursor.row -= 1;
+            self.cursor.column = self.buffer.line_len(self.cursor.row);
+        }
         cx.notify();
     }
 
     fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
-        self.engine.handle_action(EditorAction::SelectRight);
+        if self.selection_anchor.is_none() {
+            self.selection_anchor = Some(self.cursor);
+        }
+
+        let line_len = self.buffer.line_len(self.cursor.row);
+        if self.cursor.column < line_len {
+            self.cursor.column += 1;
+            if let Some(line) = self.buffer.line(self.cursor.row) {
+                while self.cursor.column < line.len() && !line.is_char_boundary(self.cursor.column)
+                {
+                    self.cursor.column += 1;
+                }
+            }
+        } else if self.cursor.row + 1 < self.buffer.line_count() {
+            self.cursor.row += 1;
+            self.cursor.column = 0;
+        }
         cx.notify();
     }
 
     fn select_up(&mut self, _: &SelectUp, _: &mut Window, cx: &mut Context<Self>) {
-        self.engine.handle_action(EditorAction::SelectUp);
+        if self.selection_anchor.is_none() {
+            self.selection_anchor = Some(self.cursor);
+        }
+        self.cursor = self.buffer.move_visual_up(self.cursor);
         cx.notify();
     }
 
     fn select_down(&mut self, _: &SelectDown, _: &mut Window, cx: &mut Context<Self>) {
-        self.engine.handle_action(EditorAction::SelectDown);
+        if self.selection_anchor.is_none() {
+            self.selection_anchor = Some(self.cursor);
+        }
+        self.cursor = self.buffer.move_visual_down(self.cursor);
         cx.notify();
     }
 
     fn select_word_left(&mut self, _: &SelectWordLeft, _: &mut Window, cx: &mut Context<Self>) {
-        self.engine.handle_action(EditorAction::SelectWordLeft);
+        if self.selection_anchor.is_none() {
+            self.selection_anchor = Some(self.cursor);
+        }
+
+        if let Some(line) = self.buffer.line(self.cursor.row) {
+            if self.cursor.column == 0 {
+                if self.cursor.row > 0 {
+                    self.cursor.row -= 1;
+                    self.cursor.column = self.buffer.line_len(self.cursor.row);
+                }
+                cx.notify();
+                return;
+            }
+
+            let chars: Vec<char> = line.chars().collect();
+            let mut char_pos = line[..self.cursor.column].chars().count();
+
+            if char_pos == 0 {
+                cx.notify();
+                return;
+            }
+
+            char_pos -= 1;
+            while char_pos > 0 && chars[char_pos].is_whitespace() {
+                char_pos -= 1;
+            }
+
+            if char_pos > 0 {
+                let is_alphanumeric = chars[char_pos].is_alphanumeric() || chars[char_pos] == '_';
+                while char_pos > 0 {
+                    let prev_char = chars[char_pos - 1];
+                    let prev_is_alphanumeric = prev_char.is_alphanumeric() || prev_char == '_';
+                    if is_alphanumeric != prev_is_alphanumeric || prev_char.is_whitespace() {
+                        break;
+                    }
+                    char_pos -= 1;
+                }
+            }
+
+            let byte_pos: usize = chars[..char_pos].iter().map(|c| c.len_utf8()).sum();
+            self.cursor.column = byte_pos;
+        }
         cx.notify();
     }
 
     fn select_word_right(&mut self, _: &SelectWordRight, _: &mut Window, cx: &mut Context<Self>) {
-        self.engine.handle_action(EditorAction::SelectWordRight);
+        if self.selection_anchor.is_none() {
+            self.selection_anchor = Some(self.cursor);
+        }
+
+        if let Some(line) = self.buffer.line(self.cursor.row) {
+            if self.cursor.column >= line.len() {
+                if self.cursor.row + 1 < self.buffer.line_count() {
+                    self.cursor.row += 1;
+                    self.cursor.column = 0;
+                }
+                cx.notify();
+                return;
+            }
+
+            let after = &line[self.cursor.column..];
+            let chars: Vec<char> = after.chars().collect();
+            let mut char_pos = 0;
+
+            if chars.is_empty() {
+                cx.notify();
+                return;
+            }
+
+            while char_pos < chars.len() && chars[char_pos].is_whitespace() {
+                char_pos += 1;
+            }
+
+            if char_pos < chars.len() {
+                let is_alphanumeric = chars[char_pos].is_alphanumeric() || chars[char_pos] == '_';
+                while char_pos < chars.len() {
+                    let curr_char = chars[char_pos];
+                    let curr_is_alphanumeric = curr_char.is_alphanumeric() || curr_char == '_';
+                    if is_alphanumeric != curr_is_alphanumeric || curr_char.is_whitespace() {
+                        break;
+                    }
+                    char_pos += 1;
+                }
+            }
+
+            let byte_offset: usize = chars[..char_pos].iter().map(|c| c.len_utf8()).sum();
+            self.cursor.column += byte_offset;
+        }
         cx.notify();
     }
 
     fn select_all(&mut self, _: &SelectAll, _window: &mut Window, cx: &mut Context<Self>) {
-        self.engine.handle_action(EditorAction::SelectAll);
+        self.selection_anchor = Some(BufferPosition::zero());
+        let last_row = self.buffer.line_count().saturating_sub(1);
+        let last_col = self.buffer.line_len(last_row);
+        self.cursor = BufferPosition::new(last_row, last_col);
         cx.notify();
     }
 
@@ -272,10 +612,13 @@ impl TextEditor {
             let end_offset = self.buffer.position_to_byte_offset(end);
             let content = self.buffer.to_string();
             if end_offset <= content.len() {
+                self.push_undo_state();
+                self.last_edit_time = None;
                 let selected_text = content[start_offset..end_offset].to_string();
                 cx.write_to_clipboard(selected_text.into());
-                self.engine.handle_action(EditorAction::Cut);
-                self.sync_and_save();
+                self.buffer.delete_range(start, end);
+                self.cursor = start;
+                self.clear_selection();
                 cx.notify();
             }
         }
@@ -284,15 +627,37 @@ impl TextEditor {
     fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(clipboard_item) = cx.read_from_clipboard() {
             if let Some(text) = clipboard_item.text() {
-                self.engine.handle_action(EditorAction::Paste(text));
-                self.sync_and_save();
+                self.push_undo_state();
+                self.last_edit_time = None;
+                if let Some((start, end)) = self.selection_range() {
+                    self.buffer.delete_range(start, end);
+                    self.cursor = start;
+                    self.clear_selection();
+                }
+
+                self.buffer.insert_str(self.cursor, &text);
+
+                let newline_count = text.matches('\n').count();
+                if newline_count > 0 {
+                    let last_line = text.split('\n').last().unwrap_or("");
+                    self.cursor =
+                        BufferPosition::new(self.cursor.row + newline_count, last_line.len());
+                } else {
+                    self.cursor.column += text.len();
+                }
+
                 cx.notify();
             }
         }
     }
 
-    fn position_from_mouse(&mut self, mouse_position: Point<Pixels>, window: &mut Window, wrap_width: Pixels) -> BufferPosition {
-        let line_height_px = px(self.get_font_size() * 1.5);
+    fn position_from_mouse(
+        &mut self,
+        mouse_position: Point<Pixels>,
+        window: &mut Window,
+        wrap_width: Pixels,
+    ) -> BufferPosition {
+        let line_height_px = px(self.font_size * 1.5);
         let padding_top = px(40.0);
         let padding_left = px(16.0);
 
@@ -310,10 +675,11 @@ impl TextEditor {
 
         let visual_row = (relative_y / line_height_px) as usize;
         let text_system = window.text_system();
-        let font_size_px = px(self.get_font_size());
+        let font_size_px = px(self.font_size);
 
         for buffer_row in 0..self.buffer.line_count() {
-            self.buffer.get_or_shape_line(buffer_row, font_size_px, wrap_width, &text_system);
+            self.buffer
+                .get_or_shape_line(buffer_row, font_size_px, wrap_width, &text_system);
         }
 
         let mut visual_row_counter = 0;
@@ -326,11 +692,18 @@ impl TextEditor {
 
                 for (_idx, (byte_range, _wrap_type)) in visual_lines_vec.iter().enumerate() {
                     if visual_row_counter == visual_row {
-                        if let Some(layout) = self.buffer.get_or_shape_line(buffer_row, font_size_px, wrap_width, &text_system) {
+                        if let Some(layout) = self.buffer.get_or_shape_line(
+                            buffer_row,
+                            font_size_px,
+                            wrap_width,
+                            &text_system,
+                        ) {
                             let full_line_x = layout.x_for_index(byte_range.start);
                             let relative_segment_x = relative_x + full_line_x;
-                            let column_in_full_line = layout.closest_index_for_x(relative_segment_x);
-                            let clamped_column = column_in_full_line.clamp(byte_range.start, byte_range.end);
+                            let column_in_full_line =
+                                layout.closest_index_for_x(relative_segment_x);
+                            let clamped_column =
+                                column_in_full_line.clamp(byte_range.start, byte_range.end);
                             return BufferPosition::new(buffer_row, clamped_column);
                         }
                     }
@@ -338,7 +711,12 @@ impl TextEditor {
                 }
             } else {
                 if visual_row_counter == visual_row {
-                    if let Some(layout) = self.buffer.get_or_shape_line(buffer_row, font_size_px, wrap_width, &text_system) {
+                    if let Some(layout) = self.buffer.get_or_shape_line(
+                        buffer_row,
+                        font_size_px,
+                        wrap_width,
+                        &text_system,
+                    ) {
                         let column = layout.closest_index_for_x(relative_x);
                         return BufferPosition::new(buffer_row, column);
                     }
@@ -352,7 +730,10 @@ impl TextEditor {
         BufferPosition::new(last_row, last_col)
     }
 
-    fn find_word_boundaries(&self, pos: BufferPosition) -> Option<(BufferPosition, BufferPosition)> {
+    fn find_word_boundaries(
+        &self,
+        pos: BufferPosition,
+    ) -> Option<(BufferPosition, BufferPosition)> {
         let line = self.buffer.line(pos.row)?;
         if line.is_empty() || pos.column >= line.len() {
             return None;
@@ -408,10 +789,18 @@ impl TextEditor {
             line.len()
         };
 
-        Some((BufferPosition::new(pos.row, start_byte), BufferPosition::new(pos.row, end_byte)))
+        Some((
+            BufferPosition::new(pos.row, start_byte),
+            BufferPosition::new(pos.row, end_byte),
+        ))
     }
 
-    fn handle_mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn handle_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         const DOUBLE_CLICK_DURATION: Duration = Duration::from_millis(500);
 
         let window_size = window.viewport_size();
@@ -429,19 +818,19 @@ impl TextEditor {
 
         if is_double_click {
             if let Some((start, end)) = self.find_word_boundaries(position) {
-                self.set_selection_anchor(Some(start));
-                self.set_cursor(end);
+                self.selection_anchor = Some(start);
+                self.cursor = end;
                 self.is_dragging = false;
             } else {
-                self.set_cursor(position);
-                self.set_selection_anchor(Some(position));
+                self.cursor = position;
+                self.selection_anchor = Some(position);
                 self.is_dragging = true;
             }
             self.last_click_time = None;
             self.last_click_position = None;
         } else {
-            self.set_cursor(position);
-            self.set_selection_anchor(Some(position));
+            self.cursor = position;
+            self.selection_anchor = Some(position);
             self.is_dragging = true;
             self.last_click_time = Some(now);
             self.last_click_position = Some(position);
@@ -450,34 +839,56 @@ impl TextEditor {
         cx.notify();
     }
 
-    fn handle_mouse_move(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn handle_mouse_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.is_dragging {
             let window_size = window.viewport_size();
             let wrap_width = window_size.width - px(32.0);
             let position = self.position_from_mouse(event.position, window, wrap_width);
-            self.set_cursor(position);
+            self.cursor = position;
             cx.notify();
         }
     }
 
-    fn handle_mouse_up(&mut self, _event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
+    fn handle_mouse_up(
+        &mut self,
+        _event: &MouseUpEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.is_dragging = false;
-        if let Some(anchor) = self.get_selection_anchor() {
-            if anchor == self.get_cursor() {
-                self.set_selection_anchor(None);
+        if let Some(anchor) = self.selection_anchor {
+            if anchor == self.cursor {
+                self.clear_selection();
             }
         }
         cx.notify();
     }
 
-    fn handle_key_down(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+    fn handle_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(key_char) = &event.keystroke.key_char {
             if !event.keystroke.modifiers.platform
                 && !event.keystroke.modifiers.control
                 && !event.keystroke.modifiers.alt
             {
-                self.engine.handle_action(EditorAction::TypeString(key_char.clone()));
-                self.sync_and_save();
+                self.push_undo_state();
+                self.mark_edit_time();
+                if let Some((start, end)) = self.selection_range() {
+                    self.buffer.delete_range(start, end);
+                    self.cursor = start;
+                    self.clear_selection();
+                }
+                self.buffer.insert_str(self.cursor, key_char);
+                self.cursor.column += key_char.len();
                 cx.notify();
             }
         }
@@ -492,8 +903,7 @@ impl Focusable for TextEditor {
 
 impl Render for TextEditor {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        let font_size_px = px(self.get_font_size());
-        let cursor = self.get_cursor();
+        let font_size_px = px(self.font_size);
         let is_empty = self.buffer.line_count() == 1 && self.buffer.line_len(0) == 0;
         let window_size = _window.viewport_size();
         let wrap_width = window_size.width - px(32.0);
@@ -603,9 +1013,9 @@ impl Render for TextEditor {
                                         display_text.push('-');
                                     }
 
-                                    let is_cursor_on_this_segment = row == cursor.row
-                                        && cursor.column >= byte_range.start
-                                        && cursor.column <= byte_range.end;
+                                    let is_cursor_on_this_segment = row == self.cursor.row
+                                        && self.cursor.column >= byte_range.start
+                                        && self.cursor.column <= byte_range.end;
 
                                     let mut line_div = div()
                                         .relative()
@@ -675,7 +1085,7 @@ impl Render for TextEditor {
                                         ) {
                                             let seg_x_offset = shaped.x_for_index(byte_range.start);
                                             let cursor_x = shaped.x_for_index(
-                                                cursor.column.min(line_text.len()),
+                                                self.cursor.column.min(line_text.len()),
                                             ) - seg_x_offset;
 
                                             line_div = line_div.child(

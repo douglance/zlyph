@@ -8,7 +8,7 @@ repository.workspace = true
 description = "A minimal text editor with terminal UI (ratatui)"
 
 [[bin]]
-name = "zlyph-tui"
+name = "zlyph"
 path = "src/main.rs"
 
 [dependencies]
