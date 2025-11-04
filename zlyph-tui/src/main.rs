@@ -133,9 +133,25 @@ impl TuiEditor {
             (KeyCode::Tab, KeyModifiers::SHIFT) => Some(EditorAction::Outdent),
             (KeyCode::Tab, KeyModifiers::NONE) => Some(EditorAction::Tab),
 
-            // Alt arrow keys for moving lines (before selection and movement)
+            // Cmd+Left/Right for line start/end (Mac)
+            (KeyCode::Left, KeyModifiers::SUPER) => Some(EditorAction::MoveToBeginningOfLine),
+            (KeyCode::Right, KeyModifiers::SUPER) => Some(EditorAction::MoveToEndOfLine),
+
+            // Alt+Left/Right for word jumping
+            (KeyCode::Left, KeyModifiers::ALT) => Some(EditorAction::MoveWordLeft),
+            (KeyCode::Right, KeyModifiers::ALT) => Some(EditorAction::MoveWordRight),
+
+            // Alt+Up/Down for moving lines
             (KeyCode::Up, KeyModifiers::ALT) => Some(EditorAction::MoveLineUp),
             (KeyCode::Down, KeyModifiers::ALT) => Some(EditorAction::MoveLineDown),
+
+            // Shift+Alt for word selection
+            (KeyCode::Left, mods) if mods.contains(KeyModifiers::SHIFT | KeyModifiers::ALT) => {
+                Some(EditorAction::SelectWordLeft)
+            }
+            (KeyCode::Right, mods) if mods.contains(KeyModifiers::SHIFT | KeyModifiers::ALT) => {
+                Some(EditorAction::SelectWordRight)
+            }
 
             // Selection with Shift (before regular movement)
             (KeyCode::Left, KeyModifiers::SHIFT) => Some(EditorAction::SelectLeft),
@@ -144,10 +160,10 @@ impl TuiEditor {
             (KeyCode::Down, KeyModifiers::SHIFT) => Some(EditorAction::SelectDown),
 
             // Cursor movement (after modifier versions)
-            (KeyCode::Left, _) => Some(EditorAction::MoveLeft),
-            (KeyCode::Right, _) => Some(EditorAction::MoveRight),
-            (KeyCode::Up, _) => Some(EditorAction::MoveUp),
-            (KeyCode::Down, _) => Some(EditorAction::MoveDown),
+            (KeyCode::Left, KeyModifiers::NONE) => Some(EditorAction::MoveLeft),
+            (KeyCode::Right, KeyModifiers::NONE) => Some(EditorAction::MoveRight),
+            (KeyCode::Up, KeyModifiers::NONE) => Some(EditorAction::MoveUp),
+            (KeyCode::Down, KeyModifiers::NONE) => Some(EditorAction::MoveDown),
             (KeyCode::Home, _) => Some(EditorAction::MoveToBeginningOfLine),
             (KeyCode::End, _) => Some(EditorAction::MoveToEndOfLine),
 

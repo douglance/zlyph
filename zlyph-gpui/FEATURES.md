@@ -39,8 +39,15 @@ Type a list item and press Enter:
 
 ### Text Selection
 - `Shift+Arrows` - select text
+- `Shift+Alt+Left/Right` - select word
 - `Ctrl+A` - select all
 - Works identically in both editors
+
+### Navigation
+- Arrow keys - move cursor
+- `Alt+Left/Right` - jump by word
+- `Cmd+Left/Right` - jump to line start/end (Mac)
+- `Home/End` - line start/end
 
 ### Line Operations
 - `Ctrl+Shift+K` - delete current line

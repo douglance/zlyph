@@ -45,11 +45,12 @@ All shortcuts work identically in both editors:
 | Delete forward | Delete |
 | **Cursor** | |
 | Move | Arrow keys |
-| Line start | Home |
-| Line end | End |
-| Word jump | Ctrl+Left/Right (GPUI only) |
+| Line start | Home or Cmd+Left |
+| Line end | End or Cmd+Right |
+| Word jump | Alt+Left/Right |
 | **Selection** | |
 | Select | Shift+Arrows |
+| Select word | Shift+Alt+Left/Right |
 | Select all | Ctrl+A |
 | **Editing** | |
 | Undo | Ctrl+Z |
