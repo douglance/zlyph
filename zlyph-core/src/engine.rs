@@ -73,6 +73,8 @@ impl EditorEngine {
             EditorAction::DeleteLine => self.delete_line(),
             EditorAction::DeleteToBeginningOfLine => self.delete_to_beginning_of_line(),
             EditorAction::DeleteToEndOfLine => self.delete_to_end_of_line(),
+            EditorAction::DeleteWordLeft => self.delete_word_left(),
+            EditorAction::DeleteWordRight => self.delete_word_right(),
             EditorAction::MoveLineUp => self.move_line_up(),
             EditorAction::MoveLineDown => self.move_line_down(),
             EditorAction::Tab => self.tab(),
@@ -392,6 +394,31 @@ impl EditorEngine {
         self.push_undo_state();
         self.last_edit_time = None;
         self.state.lines[self.state.cursor.row].replace_range(self.state.cursor.column.., "");
+    }
+
+    fn delete_word_left(&mut self) {
+        let start_pos = self.state.cursor;
+        self.move_word_left();
+        let end_pos = self.state.cursor;
+
+        if start_pos.row == end_pos.row {
+            self.push_undo_state();
+            self.last_edit_time = None;
+            self.state.lines[end_pos.row].replace_range(end_pos.column..start_pos.column, "");
+        }
+    }
+
+    fn delete_word_right(&mut self) {
+        let start_pos = self.state.cursor;
+        self.move_word_right();
+        let end_pos = self.state.cursor;
+
+        if start_pos.row == end_pos.row {
+            self.push_undo_state();
+            self.last_edit_time = None;
+            self.state.cursor = start_pos;
+            self.state.lines[start_pos.row].replace_range(start_pos.column..end_pos.column, "");
+        }
     }
 
     fn move_line_up(&mut self) {

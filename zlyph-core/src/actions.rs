@@ -37,6 +37,8 @@ pub enum EditorAction {
     DeleteLine,
     DeleteToBeginningOfLine,
     DeleteToEndOfLine,
+    DeleteWordLeft,
+    DeleteWordRight,
     MoveLineUp,
     MoveLineDown,
     Tab,

@@ -134,8 +134,8 @@ impl TuiEditor {
     }
 
     fn translate_key_event(&self, event: KeyEvent) -> Option<EditorAction> {
-        // Debug: Uncomment to see what keys are being received
-        // eprintln!("Key: {:?}, Mods: {:?}", event.code, event.modifiers);
+        // Debug: See what keys terminal sends
+        eprintln!("Key: {:?}, Mods: {:?}", event.code, event.modifiers);
 
         match (event.code, event.modifiers) {
             // Ctrl+W to quit
@@ -151,7 +151,14 @@ impl TuiEditor {
             (KeyCode::Char('k'), mods) if mods.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) => {
                 Some(EditorAction::DeleteLine)
             }
+
+            // Delete operations
             (KeyCode::Backspace, KeyModifiers::SUPER) => Some(EditorAction::DeleteLine),
+            (KeyCode::Backspace, KeyModifiers::CONTROL) => Some(EditorAction::DeleteToBeginningOfLine),
+            (KeyCode::Backspace, KeyModifiers::ALT) => Some(EditorAction::DeleteWordLeft),
+            (KeyCode::Delete, KeyModifiers::SUPER) => Some(EditorAction::DeleteToEndOfLine),
+            (KeyCode::Delete, KeyModifiers::CONTROL) => Some(EditorAction::DeleteToEndOfLine),
+            (KeyCode::Delete, KeyModifiers::ALT) => Some(EditorAction::DeleteWordRight),
 
             // Font size (will be ignored in TUI but kept for consistency)
             (KeyCode::Char('='), KeyModifiers::CONTROL) => Some(EditorAction::IncreaseFontSize),
