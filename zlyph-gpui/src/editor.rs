@@ -14,6 +14,8 @@ pub struct TextEditor {
     is_dragging: bool,
     last_click_time: Option<Instant>,
     last_click_position: Option<BufferPosition>,
+    file_path: std::path::PathBuf,
+    last_modified: Option<std::time::SystemTime>,
 }
 
 impl TextEditor {
@@ -22,9 +24,12 @@ impl TextEditor {
         let file_path = EditorEngine::default_file_path();
 
         // Load existing file if it exists
-        if file_path.exists() {
+        let last_modified = if file_path.exists() {
             let _ = engine.load_from_file(&file_path);
-        }
+            std::fs::metadata(&file_path).ok().and_then(|m| m.modified().ok())
+        } else {
+            None
+        };
 
         let buffer = TextBuffer::from_string(engine.state().to_string());
 
@@ -36,6 +41,8 @@ impl TextEditor {
             is_dragging: false,
             last_click_time: None,
             last_click_position: None,
+            file_path,
+            last_modified,
         }
     }
 
@@ -52,6 +59,26 @@ impl TextEditor {
     fn sync_and_save(&mut self) {
         self.sync_buffer_from_engine();
         self.save_to_file();
+        // Update last modified time after save
+        if let Ok(metadata) = std::fs::metadata(&self.file_path) {
+            if let Ok(modified) = metadata.modified() {
+                self.last_modified = Some(modified);
+            }
+        }
+    }
+
+    fn check_and_reload(&mut self, cx: &mut Context<Self>) {
+        if let Ok(metadata) = std::fs::metadata(&self.file_path) {
+            if let Ok(modified) = metadata.modified() {
+                if self.last_modified.map_or(true, |last| modified > last) {
+                    if self.engine.load_from_file(&self.file_path).is_ok() {
+                        self.last_modified = Some(modified);
+                        self.sync_buffer_from_engine();
+                        cx.notify();
+                    }
+                }
+            }
+        }
     }
 
     fn get_cursor(&self) -> BufferPosition {
@@ -492,6 +519,9 @@ impl Focusable for TextEditor {
 
 impl Render for TextEditor {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        // Check for file changes on every render
+        self.check_and_reload(_cx);
+
         let font_size_px = px(self.get_font_size());
         let cursor = self.get_cursor();
         let is_empty = self.buffer.line_count() == 1 && self.buffer.line_len(0) == 0;

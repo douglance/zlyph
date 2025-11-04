@@ -1,6 +1,6 @@
 use anyhow::Result;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+    event::{self, poll, Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -11,10 +11,13 @@ use ratatui::{
     widgets::Paragraph,
     Terminal,
 };
+use std::time::Duration;
 use zlyph_core::{EditorAction, EditorEngine};
 
 struct TuiEditor {
     engine: EditorEngine,
+    file_path: std::path::PathBuf,
+    last_modified: Option<std::time::SystemTime>,
 }
 
 impl TuiEditor {
@@ -23,11 +26,32 @@ impl TuiEditor {
         let file_path = EditorEngine::default_file_path();
 
         // Load existing file if it exists
-        if file_path.exists() {
+        let last_modified = if file_path.exists() {
             let _ = engine.load_from_file(&file_path);
-        }
+            std::fs::metadata(&file_path).ok().and_then(|m| m.modified().ok())
+        } else {
+            None
+        };
 
-        Self { engine }
+        Self {
+            engine,
+            file_path,
+            last_modified,
+        }
+    }
+
+    fn check_and_reload(&mut self) -> bool {
+        if let Ok(metadata) = std::fs::metadata(&self.file_path) {
+            if let Ok(modified) = metadata.modified() {
+                if self.last_modified.map_or(true, |last| modified > last) {
+                    if self.engine.load_from_file(&self.file_path).is_ok() {
+                        self.last_modified = Some(modified);
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
 
     fn run(&mut self) -> Result<()> {
@@ -48,21 +72,34 @@ impl TuiEditor {
 
     fn run_loop(&mut self, terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> Result<()> {
         loop {
+            // Check for file changes before rendering
+            if self.check_and_reload() {
+                // File was reloaded
+            }
+
             terminal.draw(|frame| self.render(frame))?;
 
-            if let Event::Key(key) = event::read()? {
-                if let Some(action) = self.translate_key_event(key) {
-                    if matches!(action, EditorAction::Quit) {
-                        // Save before quitting
-                        let file_path = EditorEngine::default_file_path();
-                        let _ = self.engine.save_to_file(&file_path);
-                        break;
-                    }
-                    self.engine.handle_action(action);
+            // Poll for events with timeout to check file changes periodically
+            if poll(Duration::from_millis(100))? {
+                if let Event::Key(key) = event::read()? {
+                    if let Some(action) = self.translate_key_event(key) {
+                        if matches!(action, EditorAction::Quit) {
+                            // Save before quitting
+                            let _ = self.engine.save_to_file(&self.file_path);
+                            break;
+                        }
+                        self.engine.handle_action(action);
 
-                    // Auto-save after each action
-                    let file_path = EditorEngine::default_file_path();
-                    let _ = self.engine.save_to_file(&file_path);
+                        // Auto-save after each action
+                        if self.engine.save_to_file(&self.file_path).is_ok() {
+                            // Update last modified time after we save
+                            if let Ok(metadata) = std::fs::metadata(&self.file_path) {
+                                if let Ok(modified) = metadata.modified() {
+                                    self.last_modified = Some(modified);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
