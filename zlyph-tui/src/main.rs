@@ -122,6 +122,7 @@ impl TuiEditor {
             (KeyCode::Char('k'), mods) if mods.contains(KeyModifiers::CONTROL | KeyModifiers::SHIFT) => {
                 Some(EditorAction::DeleteLine)
             }
+            (KeyCode::Backspace, KeyModifiers::SUPER) => Some(EditorAction::DeleteLine),
 
             // Font size (will be ignored in TUI but kept for consistency)
             (KeyCode::Char('='), KeyModifiers::CONTROL) => Some(EditorAction::IncreaseFontSize),
@@ -138,21 +139,21 @@ impl TuiEditor {
             (KeyCode::Left, KeyModifiers::SUPER) => Some(EditorAction::MoveToBeginningOfLine),
             (KeyCode::Right, KeyModifiers::SUPER) => Some(EditorAction::MoveToEndOfLine),
 
-            // Alt+Left/Right for word jumping
-            (KeyCode::Left, KeyModifiers::ALT) => Some(EditorAction::MoveWordLeft),
-            (KeyCode::Right, KeyModifiers::ALT) => Some(EditorAction::MoveWordRight),
-
-            // Alt+Up/Down for moving lines
-            (KeyCode::Up, KeyModifiers::ALT) => Some(EditorAction::MoveLineUp),
-            (KeyCode::Down, KeyModifiers::ALT) => Some(EditorAction::MoveLineDown),
+            // Alt+Left/Right for word jumping (check before shift combinations)
+            (KeyCode::Left, mods) if mods == KeyModifiers::ALT => Some(EditorAction::MoveWordLeft),
+            (KeyCode::Right, mods) if mods == KeyModifiers::ALT => Some(EditorAction::MoveWordRight),
 
             // Shift+Alt for word selection
-            (KeyCode::Left, mods) if mods.contains(KeyModifiers::SHIFT | KeyModifiers::ALT) => {
+            (KeyCode::Left, mods) if mods.contains(KeyModifiers::SHIFT) && mods.contains(KeyModifiers::ALT) => {
                 Some(EditorAction::SelectWordLeft)
             }
-            (KeyCode::Right, mods) if mods.contains(KeyModifiers::SHIFT | KeyModifiers::ALT) => {
+            (KeyCode::Right, mods) if mods.contains(KeyModifiers::SHIFT) && mods.contains(KeyModifiers::ALT) => {
                 Some(EditorAction::SelectWordRight)
             }
+
+            // Alt+Up/Down for moving lines
+            (KeyCode::Up, mods) if mods == KeyModifiers::ALT => Some(EditorAction::MoveLineUp),
+            (KeyCode::Down, mods) if mods == KeyModifiers::ALT => Some(EditorAction::MoveLineDown),
 
             // Selection with Shift (before regular movement)
             (KeyCode::Left, KeyModifiers::SHIFT) => Some(EditorAction::SelectLeft),
