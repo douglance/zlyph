@@ -339,14 +339,65 @@ impl EditorEngine {
 
     fn move_word_left(&mut self) {
         self.clear_selection();
-        // Simplified word movement
-        self.move_left();
+
+        if self.state.cursor.column == 0 {
+            if self.state.cursor.row > 0 {
+                self.state.cursor.row -= 1;
+                self.state.cursor.column = self.state.lines[self.state.cursor.row].len();
+            }
+            return;
+        }
+
+        let line = &self.state.lines[self.state.cursor.row];
+        let mut pos = self.state.cursor.column;
+
+        // Skip whitespace
+        while pos > 0 && line.chars().nth(pos - 1).map_or(false, |c| c.is_whitespace()) {
+            pos -= 1;
+        }
+
+        // Skip word characters
+        while pos > 0 {
+            let ch = line.chars().nth(pos - 1);
+            if ch.map_or(false, |c| !c.is_alphanumeric() && c != '_') {
+                break;
+            }
+            pos -= 1;
+        }
+
+        self.state.cursor.column = pos;
     }
 
     fn move_word_right(&mut self) {
         self.clear_selection();
-        // Simplified word movement
-        self.move_right();
+
+        let line = &self.state.lines[self.state.cursor.row];
+
+        if self.state.cursor.column >= line.len() {
+            if self.state.cursor.row < self.state.lines.len() - 1 {
+                self.state.cursor.row += 1;
+                self.state.cursor.column = 0;
+            }
+            return;
+        }
+
+        let mut pos = self.state.cursor.column;
+
+        // Skip current word
+        while pos < line.len() {
+            let ch = line.chars().nth(pos);
+            if ch.map_or(false, |c| !c.is_alphanumeric() && c != '_') {
+                break;
+            }
+            pos += 1;
+        }
+
+        // Skip whitespace
+        while pos < line.len() && line.chars().nth(pos).map_or(false, |c| c.is_whitespace()) {
+            pos += 1;
+        }
+
+        self.state.cursor.column = pos;
     }
 
     fn undo(&mut self) {

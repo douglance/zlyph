@@ -134,10 +134,10 @@ impl TuiEditor {
     }
 
     fn translate_key_event(&self, event: KeyEvent) -> Option<EditorAction> {
-        // Debug: See what keys terminal sends
-        eprintln!("Key: {:?}, Mods: {:?}", event.code, event.modifiers);
+        // Debug: Uncomment to see what keys terminal sends (redirects to stderr)
+        // eprintln!("Key: {:?}, Mods: {:?}", event.code, event.modifiers);
 
-        match (event.code, event.modifiers) {
+        let action = match (event.code, event.modifiers) {
             // Ctrl+W to quit
             (KeyCode::Char('w'), KeyModifiers::CONTROL) => Some(EditorAction::Quit),
 
@@ -160,12 +160,16 @@ impl TuiEditor {
             (KeyCode::Delete, KeyModifiers::CONTROL) => Some(EditorAction::DeleteToEndOfLine),
             (KeyCode::Delete, KeyModifiers::ALT) => Some(EditorAction::DeleteWordRight),
 
+            // Terminal-intercepted Cmd+Backspace fallback (terminal sends Ctrl+U)
+            (KeyCode::Char('u'), KeyModifiers::CONTROL) => Some(EditorAction::DeleteToBeginningOfLine),
+
             // Font size (will be ignored in TUI but kept for consistency)
             (KeyCode::Char('='), KeyModifiers::CONTROL) => Some(EditorAction::IncreaseFontSize),
             (KeyCode::Char('-'), KeyModifiers::CONTROL) => Some(EditorAction::DecreaseFontSize),
 
-            // Ctrl+A for select all
-            (KeyCode::Char('a'), KeyModifiers::CONTROL) => Some(EditorAction::SelectAll),
+            // Terminal-intercepted Cmd+arrow fallbacks (terminal sends Ctrl+A/E for Cmd+Left/Right)
+            (KeyCode::Char('a'), KeyModifiers::CONTROL) => Some(EditorAction::MoveToBeginningOfLine),
+            (KeyCode::Char('e'), KeyModifiers::CONTROL) => Some(EditorAction::MoveToEndOfLine),
 
             // Tab/Outdent
             (KeyCode::Tab, KeyModifiers::SHIFT) => Some(EditorAction::Outdent),
@@ -210,13 +214,20 @@ impl TuiEditor {
             (KeyCode::Delete, _) => Some(EditorAction::Delete),
             (KeyCode::Enter, _) => Some(EditorAction::Newline),
 
+            // Terminal-intercepted Alt+arrow fallbacks (when terminal sends Alt+b/f instead of Alt+arrows)
+            (KeyCode::Char('b'), KeyModifiers::ALT) => Some(EditorAction::MoveWordLeft),
+            (KeyCode::Char('f'), KeyModifiers::ALT) => Some(EditorAction::MoveWordRight),
+
             // Regular character input
             (KeyCode::Char(c), KeyModifiers::NONE) | (KeyCode::Char(c), KeyModifiers::SHIFT) => {
                 Some(EditorAction::TypeCharacter(c))
             }
 
             _ => None,
-        }
+        };
+
+        // eprintln!("Action: {:?}", action);
+        action
     }
 
     fn render(&self, frame: &mut ratatui::Frame) {
