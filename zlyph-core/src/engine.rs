@@ -101,14 +101,18 @@ impl EditorEngine {
             EditorAction::Quit => {
                 // Handled by platform-specific code
             }
+            EditorAction::SetCursorPosition { row, column } => {
+                self.set_cursor_position(row, column)
+            }
+            EditorAction::StartSelection { row, column } => self.start_selection(row, column),
+            EditorAction::ExtendSelection { row, column } => self.extend_selection(row, column),
         }
     }
 
     fn selection_range(&self) -> Option<(BufferPosition, BufferPosition)> {
         self.state.selection_anchor.map(|anchor| {
             if anchor.row < self.state.cursor.row
-                || (anchor.row == self.state.cursor.row
-                    && anchor.column < self.state.cursor.column)
+                || (anchor.row == self.state.cursor.row && anchor.column < self.state.cursor.column)
             {
                 (anchor, self.state.cursor)
             } else {
@@ -150,7 +154,9 @@ impl EditorEngine {
             let line = self.state.lines[self.state.cursor.row].clone();
             let (before, after) = line.split_at(self.state.cursor.column);
             self.state.lines[self.state.cursor.row] = before.to_string();
-            self.state.lines.insert(self.state.cursor.row + 1, after.to_string());
+            self.state
+                .lines
+                .insert(self.state.cursor.row + 1, after.to_string());
             self.state.cursor = BufferPosition::new(self.state.cursor.row + 1, 0);
         } else {
             self.state.lines[self.state.cursor.row].insert(self.state.cursor.column, c);
@@ -168,7 +174,9 @@ impl EditorEngine {
                 let line = self.state.lines[self.state.cursor.row].clone();
                 let (before, after) = line.split_at(self.state.cursor.column);
                 self.state.lines[self.state.cursor.row] = before.to_string();
-                self.state.lines.insert(self.state.cursor.row + 1, after.to_string());
+                self.state
+                    .lines
+                    .insert(self.state.cursor.row + 1, after.to_string());
                 self.state.cursor = BufferPosition::new(self.state.cursor.row + 1, 0);
             } else {
                 self.state.lines[self.state.cursor.row].insert(self.state.cursor.column, c);
@@ -265,18 +273,24 @@ impl EditorEngine {
             if is_empty {
                 let before_pattern = &line[..line.len() - pattern_len];
                 self.state.lines[self.state.cursor.row] = before_pattern.to_string();
-                self.state.lines.insert(self.state.cursor.row + 1, String::new());
+                self.state
+                    .lines
+                    .insert(self.state.cursor.row + 1, String::new());
                 self.state.cursor = BufferPosition::new(self.state.cursor.row + 1, 0);
             } else {
                 let (before, after) = line.split_at(self.state.cursor.column);
                 self.state.lines[self.state.cursor.row] = before.to_string();
-                self.state.lines.insert(self.state.cursor.row + 1, pattern.clone() + after);
+                self.state
+                    .lines
+                    .insert(self.state.cursor.row + 1, pattern.clone() + after);
                 self.state.cursor = BufferPosition::new(self.state.cursor.row + 1, pattern.len());
             }
         } else {
             let (before, after) = line.split_at(self.state.cursor.column);
             self.state.lines[self.state.cursor.row] = before.to_string();
-            self.state.lines.insert(self.state.cursor.row + 1, after.to_string());
+            self.state
+                .lines
+                .insert(self.state.cursor.row + 1, after.to_string());
             self.state.cursor = BufferPosition::new(self.state.cursor.row + 1, 0);
         }
     }
@@ -352,7 +366,12 @@ impl EditorEngine {
         let mut pos = self.state.cursor.column;
 
         // Skip whitespace
-        while pos > 0 && line.chars().nth(pos - 1).map_or(false, |c| c.is_whitespace()) {
+        while pos > 0
+            && line
+                .chars()
+                .nth(pos - 1)
+                .map_or(false, |c| c.is_whitespace())
+        {
             pos -= 1;
         }
 
@@ -478,7 +497,9 @@ impl EditorEngine {
         }
         self.push_undo_state();
         self.last_edit_time = None;
-        self.state.lines.swap(self.state.cursor.row, self.state.cursor.row - 1);
+        self.state
+            .lines
+            .swap(self.state.cursor.row, self.state.cursor.row - 1);
         self.state.cursor.row -= 1;
     }
 
@@ -488,7 +509,9 @@ impl EditorEngine {
         }
         self.push_undo_state();
         self.last_edit_time = None;
-        self.state.lines.swap(self.state.cursor.row, self.state.cursor.row + 1);
+        self.state
+            .lines
+            .swap(self.state.cursor.row, self.state.cursor.row + 1);
         self.state.cursor.row += 1;
     }
 
@@ -535,7 +558,8 @@ impl EditorEngine {
                 .count();
             if spaces_to_remove > 0 {
                 self.state.lines[self.state.cursor.row].replace_range(..spaces_to_remove, "");
-                self.state.cursor.column = self.state.cursor.column.saturating_sub(spaces_to_remove);
+                self.state.cursor.column =
+                    self.state.cursor.column.saturating_sub(spaces_to_remove);
             }
         }
     }
@@ -615,6 +639,32 @@ impl EditorEngine {
         self.state.cursor = BufferPosition::new(last_row, last_col);
     }
 
+    /// Set cursor to specific position, clamping to valid bounds
+    fn set_cursor_position(&mut self, row: usize, column: usize) {
+        self.clear_selection();
+        let row = row.min(self.state.lines.len().saturating_sub(1));
+        let column = column.min(self.state.lines[row].len());
+        self.state.cursor = BufferPosition::new(row, column);
+    }
+
+    /// Start a new selection at position
+    fn start_selection(&mut self, row: usize, column: usize) {
+        let row = row.min(self.state.lines.len().saturating_sub(1));
+        let column = column.min(self.state.lines[row].len());
+        self.state.cursor = BufferPosition::new(row, column);
+        self.state.selection_anchor = Some(self.state.cursor);
+    }
+
+    /// Extend selection to position
+    fn extend_selection(&mut self, row: usize, column: usize) {
+        if self.state.selection_anchor.is_none() {
+            self.state.selection_anchor = Some(self.state.cursor);
+        }
+        let row = row.min(self.state.lines.len().saturating_sub(1));
+        let column = column.min(self.state.lines[row].len());
+        self.state.cursor = BufferPosition::new(row, column);
+    }
+
     /// Load editor state from a file
     pub fn load_from_file<P: AsRef<Path>>(&mut self, path: P) -> io::Result<()> {
         let content = fs::read_to_string(path)?;
@@ -645,7 +695,10 @@ impl EditorEngine {
         let home = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
             .unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(home).join(".config").join("zlyph").join("default.txt")
+        PathBuf::from(home)
+            .join(".config")
+            .join("zlyph")
+            .join("default.txt")
     }
 }
 

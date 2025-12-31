@@ -51,4 +51,9 @@ pub enum EditorAction {
 
     // System operations
     Quit,
+
+    // Mouse-driven cursor positioning
+    SetCursorPosition { row: usize, column: usize },
+    StartSelection { row: usize, column: usize },
+    ExtendSelection { row: usize, column: usize },
 }

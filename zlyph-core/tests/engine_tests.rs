@@ -243,7 +243,10 @@ fn test_select_all() {
     engine.handle_action(EditorAction::SelectAll);
 
     assert!(engine.state().selection_anchor.is_some());
-    assert_eq!(engine.state().selection_anchor.unwrap(), BufferPosition::zero());
+    assert_eq!(
+        engine.state().selection_anchor.unwrap(),
+        BufferPosition::zero()
+    );
     assert_eq!(engine.state().cursor.row, 1);
     assert_eq!(engine.state().cursor.column, 5);
 }
